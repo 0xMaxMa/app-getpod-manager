@@ -94,7 +94,10 @@ func (h *Handler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	f.WriteString(strings.TrimSpace(req.Key) + "\n")
+	if _, err := f.WriteString(strings.TrimSpace(req.Key) + "\n"); err != nil {
+		jsonErr(w, "failed to write authorized_keys", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
@@ -135,7 +138,10 @@ func (h *Handler) DeleteSSHKey(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 	for _, k := range remaining {
-		f.WriteString(k.Raw + "\n")
+		if _, err := f.WriteString(k.Raw + "\n"); err != nil {
+			jsonErr(w, "failed to write authorized_keys", http.StatusInternalServerError)
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

@@ -26,6 +26,9 @@ type scriptResult struct {
 }
 
 func callScript(name string, args map[string]string) (string, error) {
+	if args == nil {
+		args = map[string]string{}
+	}
 	body, _ := json.Marshal(map[string]interface{}{"args": args})
 	resp, err := socketClient.Post(
 		"http://gateway/tool/script/"+name,
