@@ -1,9 +1,9 @@
-apiVersion: apps.getpod.ai/v1
+apiVersion: v1
 name: getpod-manager
 version: 1.0.0
 description: VM resize, SSH keys, and usage metrics
 author: 0xMaxMa
-source: https://github.com/0xMaxMa/getpod-manager
+source: https://github.com/0xMaxMa/app-getpod-manager
 commit: ""
 
 resources:
