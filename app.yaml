@@ -4,7 +4,7 @@ version: 1.0.0
 description: VM resize, SSH keys, and usage metrics
 author: 0xMaxMa
 source: https://github.com/0xMaxMa/app-getpod-manager
-commit: ""
+commit: "21d33661d6a6104be9206dd72bbf18411ead4d33"
 
 resources:
   cpu: 0.5
