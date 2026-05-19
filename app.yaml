@@ -1,0 +1,47 @@
+apiVersion: v1
+name: getpod-manager
+version: 1.0.0
+description: VM resize, SSH keys, and usage metrics
+author: 0xMaxMa
+source: https://github.com/0xMaxMa/app-getpod-manager
+commit: ""
+
+resources:
+  cpu: 0.5
+  memory: 128M
+
+services:
+  getpod-manager-app:
+    build: .
+    ports:
+      - name: app
+        container: 5990
+        type: api
+    environment:
+      - GATEWAY_API_KEY
+    volumes:
+      - /home/ubuntu/.ssh/authorized_keys:/host-ssh/authorized_keys:rw
+      - /proc/stat:/host-proc/stat:ro
+      - /proc/meminfo:/host-proc/meminfo:ro
+    gateway_api:
+      socket: /run/gateway.sock
+      scripts:
+        resize-disk:
+          path: scripts/resize-disk.sh
+          timeout: 60s
+          args:
+            - name: disk_device
+              type: string
+              pattern: "^/dev/(sd|vd)[a-z]$"
+        online-cpus:
+          path: scripts/online-cpus.sh
+          timeout: 10s
+        online-memory:
+          path: scripts/online-memory.sh
+          timeout: 10s
+        disk-info:
+          path: scripts/disk-info.sh
+          timeout: 5s
+    healthcheck:
+      test: wget -qO- http://localhost:5990/health
+      interval: 30s
