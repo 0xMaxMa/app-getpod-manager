@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 )
@@ -13,13 +12,6 @@ type resizeRequest struct {
 	DiskGiB   *int `json:"disk_gib"`
 	CPUCores  *int `json:"cpu_cores"`
 	MemoryMiB *int `json:"memory_mib"`
-}
-
-func diskDevice() string {
-	if dev := os.Getenv("DISK_DEVICE"); dev != "" {
-		return dev
-	}
-	return "/dev/sda"
 }
 
 func (h *Handler) Resize(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +44,7 @@ func (h *Handler) Resize(w http.ResponseWriter, r *http.Request) {
 	resp := resizeResp{}
 
 	if req.DiskGiB != nil {
-		_, err := callScript("resize-disk", map[string]string{"disk_device": diskDevice()})
+		_, err := callScript("resize-disk", nil)
 		if err != nil {
 			jsonErr(w, fmt.Sprintf("resize-disk failed: %s", err), http.StatusInternalServerError)
 			return

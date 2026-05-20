@@ -17,8 +17,9 @@ services:
         type: api
     environment:
       - GATEWAY_API_KEY
+      - SSH_HOME
     volumes:
-      - /home/ubuntu/.ssh/authorized_keys:/host-ssh/authorized_keys:rw
+      - ${SSH_HOME}/.ssh/authorized_keys:/host-ssh/authorized_keys:rw
       - /proc/stat:/host-proc/stat:ro
       - /proc/meminfo:/host-proc/meminfo:ro
     gateway_api:
@@ -27,10 +28,6 @@ services:
         resize-disk:
           path: scripts/resize-disk.sh
           timeout: 60s
-          args:
-            - name: disk_device
-              type: string
-              pattern: "^/dev/(sd|vd)[a-z]$"
         online-cpus:
           path: scripts/online-cpus.sh
           timeout: 10s
