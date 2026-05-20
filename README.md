@@ -81,10 +81,8 @@ curl -s http://localhost:10850/api/v1/apps/jobs/<jobId> \
 ## Uninstall
 
 ```bash
-curl -s -X POST http://localhost:10850/api/v1/apps/uninstall \
-  -H "X-Api-Key: <claude-gateway-admin-api-key>" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "getpod-manager"}'
+curl -s -X DELETE http://localhost:10850/api/v1/apps/getpod-manager \
+  -H "X-Api-Key: <claude-gateway-admin-api-key>"
 ```
 
 ## API Reference
