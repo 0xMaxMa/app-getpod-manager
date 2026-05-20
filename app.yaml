@@ -16,7 +16,7 @@ services:
         container: 5990
         type: api
     environment:
-      - GATEWAY_API_KEY
+      - API_KEY
       - SSH_HOME
     volumes:
       - ${SSH_HOME}/.ssh/authorized_keys:/host-ssh/authorized_keys:rw
