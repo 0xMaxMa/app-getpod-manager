@@ -30,10 +30,10 @@ install-watch: ## Install app and poll until done
 # It is located at ~/.claude-gateway/apps/getpod-manager/docker-compose.yml, not in this repo.
 # To use start/stop/logs, run from the installed app directory instead.
 start: ## Start app with docker compose (requires prior 'make install')
-	docker compose -f ../docker-compose.yml up -d
+	docker compose -f ../../docker-compose.yml up -d
 
 stop: ## Stop app with docker compose (requires prior 'make install')
-	docker compose -f ../docker-compose.yml down
+	docker compose -f ../../docker-compose.yml down
 
 logs: ## Follow app logs (requires prior 'make install')
-	docker compose -f ../docker-compose.yml logs -f
+	docker compose -f ../../docker-compose.yml logs -f

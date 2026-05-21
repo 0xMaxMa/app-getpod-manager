@@ -4,22 +4,20 @@ version: 1.0.0
 description: VM resize, SSH keys, and usage metrics
 author: 0xMaxMa
 
-resources:
-  cpu: 0.5
-  memory: 128M
-
 services:
-  getpod-manager-app:
+  api:
     build: .
+    resources:
+      cpu: 0.5
+      memory: 128M
     ports:
-      - name: app
+      - name: api
+        host: 5990
         container: 5990
         type: api
     environment:
       - API_KEY
       - SSH_HOME
-    cap_drop:
-      - ALL
     cap_add:
       - DAC_READ_SEARCH
       - DAC_OVERRIDE
