@@ -139,7 +139,7 @@ cp .env.example .env
 # Edit .env — set API_KEY, SSH_HOME
 
 # 2. Set gateway credentials for tools
-echo "GATEWAY_API_KEY=<your-gateway-key>" > tools/.env
+echo "GATEWAY_API_KEY=<your-gateway-key>" > tools/installs/.env
 ```
 
 ### Run locally with Docker Compose

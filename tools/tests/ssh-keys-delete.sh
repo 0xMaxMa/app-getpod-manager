@@ -7,8 +7,8 @@ if [ -z "$FINGERPRINT" ]; then
   exit 1
 fi
 
-ENCODED=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$FINGERPRINT'))" 2>/dev/null \
-  || node -e "console.log(encodeURIComponent('$FINGERPRINT'))")
+ENCODED=$(python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.environ['FINGERPRINT']))" 2>/dev/null \
+  || node -e "console.log(encodeURIComponent(process.env.FINGERPRINT))")
 
 curl -s -X DELETE \
   "${BASE_URL:-http://localhost:5990}/ssh-keys/${ENCODED}" \
