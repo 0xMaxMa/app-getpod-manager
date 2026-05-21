@@ -18,6 +18,11 @@ services:
     environment:
       - API_KEY
       - SSH_HOME
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_READ_SEARCH
+      - DAC_OVERRIDE
     volumes:
       - ${SSH_HOME}/.ssh/authorized_keys:/host-ssh/authorized_keys:rw
       - /proc/stat:/host-proc/stat:ro
