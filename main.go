@@ -9,9 +9,9 @@ import (
 )
 
 func main() {
-	apiKey := os.Getenv("GATEWAY_API_KEY")
+	apiKey := os.Getenv("API_KEY")
 	if apiKey == "" {
-		log.Fatal("GATEWAY_API_KEY is required")
+		log.Fatal("API_KEY is required")
 	}
 
 	h := handlers.New(apiKey)

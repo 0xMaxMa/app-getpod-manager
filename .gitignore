@@ -1,1 +1,4 @@
-*planning*.md
+.env
+docker-compose.yml
+tools/planning/
+.claude-gateway
