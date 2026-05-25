@@ -7,7 +7,7 @@ if [ -z "$FINGERPRINT" ]; then
   exit 1
 fi
 
-ENCODED=$(python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.environ['FINGERPRINT']))" 2>/dev/null \
+ENCODED=$(python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.environ['FINGERPRINT'], safe=''))" 2>/dev/null \
   || node -e "console.log(encodeURIComponent(process.env.FINGERPRINT))")
 
 curl -s -X DELETE \
