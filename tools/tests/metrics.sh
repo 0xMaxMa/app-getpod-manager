@@ -3,5 +3,5 @@
 
 curl -s -X GET \
   "${BASE_URL:-http://localhost:5990}/metrics" \
-  -H "Authorization: Bearer ${API_KEY}" \
+  -H "X-Api-Key: ${API_KEY}" \
   -H "Content-Type: application/json" | jq
