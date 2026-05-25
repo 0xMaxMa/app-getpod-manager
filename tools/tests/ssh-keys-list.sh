@@ -3,4 +3,4 @@
 
 curl -s -X GET \
   "${BASE_URL:-http://localhost:5990}/ssh-keys" \
-  -H "Authorization: Bearer ${API_KEY}" | jq
+  -H "X-Api-Key: ${API_KEY}" | jq

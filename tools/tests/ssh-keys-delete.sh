@@ -12,4 +12,4 @@ ENCODED=$(python3 -c "import urllib.parse, os; print(urllib.parse.quote(os.envir
 
 curl -s -X DELETE \
   "${BASE_URL:-http://localhost:5990}/ssh-keys/${ENCODED}" \
-  -H "Authorization: Bearer ${API_KEY}" | jq
+  -H "X-Api-Key: ${API_KEY}" | jq

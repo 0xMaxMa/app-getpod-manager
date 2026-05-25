@@ -19,6 +19,6 @@ body="{$(IFS=,; echo "${parts[*]}")}"
 
 curl -s -X POST \
   "${BASE_URL:-http://localhost:5990}/resize" \
-  -H "Authorization: Bearer ${API_KEY}" \
+  -H "X-Api-Key: ${API_KEY}" \
   -H "Content-Type: application/json" \
   -d "$body" | jq

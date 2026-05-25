@@ -25,7 +25,7 @@ func New(apiKey string) *Handler {
 
 func (h *Handler) Auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer "+h.apiKey {
+		if r.Header.Get("X-Api-Key") != h.apiKey {
 			jsonErr(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
