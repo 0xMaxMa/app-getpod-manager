@@ -7,7 +7,7 @@
 SHELL := /bin/bash
 DIR   := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: health metrics resize ssh-keys-list ssh-keys-add ssh-keys-delete help
+.PHONY: health metrics resize ssh-keys-list ssh-keys-add ssh-keys-delete theme help
 
 help:
 	@echo "Available targets:"
@@ -17,6 +17,7 @@ help:
 	@echo "  make ssh-keys-list       GET /ssh-keys"
 	@echo "  make ssh-keys-add        POST /ssh-keys  (SSH_KEY=)"
 	@echo "  make ssh-keys-delete     DELETE /ssh-keys/:fingerprint  (FINGERPRINT=)"
+	@echo "  make theme               PATCH /theme  (THEME=dark|light)"
 	@echo ""
 	@echo "Example:"
 	@echo "  make metrics"
@@ -41,3 +42,6 @@ ssh-keys-add:
 
 ssh-keys-delete:
 	@bash $(DIR)ssh-keys-delete.sh
+
+theme:
+	@bash $(DIR)theme.sh
