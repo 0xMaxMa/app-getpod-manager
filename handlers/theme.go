@@ -33,11 +33,6 @@ func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "failed to create settings directory", http.StatusInternalServerError)
 		return
 	}
-	// Make dir writable by ubuntu so VS Code can atomically save settings (needs to create temp file)
-	if err := os.Chmod(dir, 0777); err != nil {
-		jsonErr(w, "failed to set directory permissions", http.StatusInternalServerError)
-		return
-	}
 
 	settings := map[string]interface{}{}
 	if data, err := os.ReadFile(codeServerSettingsPath); err == nil {
