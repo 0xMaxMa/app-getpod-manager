@@ -28,10 +28,12 @@ func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := os.MkdirAll(filepath.Dir(codeServerSettingsPath), 0755); err != nil {
+	dir := filepath.Dir(codeServerSettingsPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		jsonErr(w, "failed to create settings directory", http.StatusInternalServerError)
 		return
 	}
+	_ = os.Chown(dir, 1000, 1000)
 
 	settings := map[string]interface{}{}
 	if data, err := os.ReadFile(codeServerSettingsPath); err == nil {
@@ -44,10 +46,21 @@ func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "failed to encode settings", http.StatusInternalServerError)
 		return
 	}
-	if err := os.WriteFile(codeServerSettingsPath, data, 0644); err != nil {
+
+	// Atomic rename: write temp then rename so code-server picks up the inotify
+	// CREATE/MOVED_TO event reliably (IN_MODIFY from Docker bind mounts can be missed)
+	tmpPath := codeServerSettingsPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 		jsonErr(w, "failed to write settings", http.StatusInternalServerError)
 		return
 	}
+	if err := os.Rename(tmpPath, codeServerSettingsPath); err != nil {
+		os.Remove(tmpPath)
+		jsonErr(w, "failed to write settings", http.StatusInternalServerError)
+		return
+	}
+	// Transfer ownership to ubuntu user so code-server can save settings from UI
+	_ = os.Chown(codeServerSettingsPath, 1000, 1000)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"theme": req.Theme, "colorTheme": colorTheme})
