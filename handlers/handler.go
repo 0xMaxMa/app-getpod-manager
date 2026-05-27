@@ -7,9 +7,10 @@ import (
 )
 
 type Handler struct {
-	apiKey string
-	cpuMu  sync.RWMutex
-	cpu    *cpuStat
+	apiKey  string
+	version string
+	cpuMu   sync.RWMutex
+	cpu     *cpuStat
 }
 
 type cpuStat struct {
@@ -17,8 +18,8 @@ type cpuStat struct {
 	UsagePercent float64
 }
 
-func New(apiKey string) *Handler {
-	h := &Handler{apiKey: apiKey}
+func New(apiKey, version string) *Handler {
+	h := &Handler{apiKey: apiKey, version: version}
 	go h.runCPULoop()
 	return h
 }
@@ -35,7 +36,7 @@ func (h *Handler) Auth(next http.Handler) http.Handler {
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": "1.0.0"})
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "version": h.version})
 }
 
 func jsonErr(w http.ResponseWriter, msg string, code int) {

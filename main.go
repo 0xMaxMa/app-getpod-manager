@@ -8,13 +8,15 @@ import (
 	"github.com/0xMaxMa/getpod-manager/handlers"
 )
 
+var Version = "dev"
+
 func main() {
 	apiKey := os.Getenv("API_KEY")
 	if apiKey == "" {
 		log.Fatal("API_KEY is required")
 	}
 
-	h := handlers.New(apiKey)
+	h := handlers.New(apiKey, Version)
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", h.Health)
