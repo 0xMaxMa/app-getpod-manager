@@ -12,8 +12,9 @@ A lightweight sidecar app that runs inside a GetPod VM. It exposes a JSON API fo
 | List SSH keys | `GET /ssh-keys` |
 | Add SSH key | `POST /ssh-keys` |
 | Delete SSH key | `DELETE /ssh-keys/:fingerprint` |
+| Sync code-server theme | `PATCH /theme` |
 
-All endpoints except `/health` require `Authorization: Bearer <API_KEY>`.
+All endpoints except `/health` require `X-Api-Key: <API_KEY>`.
 
 `API_KEY` is a secret you set at install time — it's used to authenticate requests to the getpod-manager API itself.
 
@@ -45,7 +46,7 @@ curl -s -X POST http://localhost:10850/api/v1/apps/install \
     "registry_app": "getpod-manager",
     "env_vars": {
       "API_KEY": "<secret>",
-      "SSH_HOME": "/home/ubuntu"
+      "USER_HOME": "/home/ubuntu"
     }
   }'
 ```
@@ -61,7 +62,7 @@ curl -s -X POST http://localhost:10850/api/v1/apps/install \
     "commit": "<commit-hash>",
     "env_vars": {
       "API_KEY": "<secret>",
-      "SSH_HOME": "/home/ubuntu"
+      "USER_HOME": "/home/ubuntu"
     }
   }'
 ```
@@ -69,7 +70,7 @@ curl -s -X POST http://localhost:10850/api/v1/apps/install \
 | Env var | Required | Description |
 |---|---|---|
 | `API_KEY` | yes | Secret key to authenticate requests to the getpod-manager API |
-| `SSH_HOME` | yes | Home directory of the user whose `authorized_keys` to manage (e.g. `/home/ubuntu`) |
+| `USER_HOME` | yes | Home directory of the user whose `authorized_keys` to manage (e.g. `/home/ubuntu`) |
 
 Poll the install job:
 
@@ -136,7 +137,7 @@ Requirements: Go 1.22+, Docker, `jq`, access to a running claude-gateway instanc
 ```bash
 # 1. Copy env file
 cp .env.example .env
-# Edit .env — set API_KEY, SSH_HOME
+# Edit .env — set API_KEY, USER_HOME
 
 # 2. Set gateway credentials for tools
 echo "GATEWAY_API_KEY=<your-gateway-key>" > tools/installs/.env

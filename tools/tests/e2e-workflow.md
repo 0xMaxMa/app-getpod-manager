@@ -24,11 +24,11 @@ Used by the API container at install time. Create if not exists:
 if [ ! -f .env ]; then
   printf "API_KEY (any secret string for gateway auth): "
   read -r api_key
-  printf "SSH_HOME (path to home dir with .ssh/authorized_keys, e.g. /home/dev): "
-  read -r ssh_home
+  printf "USER_HOME (path to home dir with .ssh/authorized_keys, e.g. /home/dev): "
+  read -r user_home
   cat > .env <<EOF
 API_KEY=${api_key}
-SSH_HOME=${ssh_home}
+USER_HOME=${user_home}
 EOF
   echo ".env created."
 fi
@@ -39,7 +39,7 @@ fi
 | Variable | Where |
 |---|---|
 | `API_KEY` | Any secret string — used to authenticate API requests |
-| `SSH_HOME` | Home directory whose `.ssh/authorized_keys` the API will manage (e.g. `/home/dev`) |
+| `USER_HOME` | Home directory whose `.ssh/authorized_keys` the API will manage (e.g. `/home/dev`) |
 
 ### 1.2 Test env — `tools/tests/.env`
 
@@ -80,11 +80,11 @@ docker ps --filter name=${APP_NAME}
 # Run from repo root
 APP_DIR=$(pwd)
 API_KEY=$(grep '^API_KEY=' .env | cut -d= -f2)
-SSH_HOME=$(grep '^SSH_HOME=' .env | cut -d= -f2)
+USER_HOME=$(grep '^USER_HOME=' .env | cut -d= -f2)
 
 gateway app install --local "$APP_DIR" \
   --env "API_KEY=${API_KEY}" \
-  --env "SSH_HOME=${SSH_HOME}"
+  --env "USER_HOME=${USER_HOME}"
 ```
 
 **Expected logs:**
@@ -171,7 +171,17 @@ make ssh-keys-list
 # Expected: list no longer contains the key from 4.4
 ```
 
-### 4.8 Resize (read-only check)
+### 4.8 Theme
+
+```bash
+THEME=dark make theme
+# Expected: {"theme":"dark","colorTheme":"Default Dark Modern"}
+
+THEME=light make theme
+# Expected: {"theme":"light","colorTheme":"Default Light Modern"}
+```
+
+### 4.9 Resize (read-only check)
 
 > ⚠️ This actually resizes VM resources. Run only when intentional.
 
