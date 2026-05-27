@@ -33,7 +33,8 @@ func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "failed to create settings directory", http.StatusInternalServerError)
 		return
 	}
-	_ = os.Chown(dir, 1000, 1000)
+	// Make dir writable by ubuntu so VS Code can atomically save settings (needs to create temp file)
+	_ = os.Chmod(dir, 0777)
 
 	settings := map[string]interface{}{}
 	if data, err := os.ReadFile(codeServerSettingsPath); err == nil {
@@ -59,9 +60,9 @@ func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "failed to write settings", http.StatusInternalServerError)
 		return
 	}
-	// Transfer ownership to ubuntu user so code-server can save settings from UI
-	if err := os.Chown(codeServerSettingsPath, 1000, 1000); err != nil {
-		jsonErr(w, "failed to set file ownership", http.StatusInternalServerError)
+	// chmod 0666: root owns file but ubuntu (others) can read+write — CAP_CHOWN not available
+	if err := os.Chmod(codeServerSettingsPath, 0666); err != nil {
+		jsonErr(w, "failed to set file permissions", http.StatusInternalServerError)
 		return
 	}
 
