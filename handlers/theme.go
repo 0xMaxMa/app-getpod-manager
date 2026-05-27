@@ -47,20 +47,32 @@ func (h *Handler) SetTheme(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Atomic rename: write temp then rename so code-server picks up the inotify
-	// CREATE/MOVED_TO event reliably (IN_MODIFY from Docker bind mounts can be missed)
-	tmpPath := codeServerSettingsPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+	// Atomic rename via unique temp file: avoids concurrent-write collision and
+	// triggers IN_CREATE/IN_MOVED_TO inotify events that chokidar picks up reliably
+	// (IN_MODIFY from Docker bind mounts can be missed)
+	tmp, err := os.CreateTemp(dir, "settings-*.json")
+	if err != nil {
+		jsonErr(w, "failed to create temp settings file", http.StatusInternalServerError)
+		return
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
 		jsonErr(w, "failed to write settings", http.StatusInternalServerError)
 		return
 	}
+	tmp.Close()
 	if err := os.Rename(tmpPath, codeServerSettingsPath); err != nil {
 		os.Remove(tmpPath)
 		jsonErr(w, "failed to write settings", http.StatusInternalServerError)
 		return
 	}
 	// Transfer ownership to ubuntu user so code-server can save settings from UI
-	_ = os.Chown(codeServerSettingsPath, 1000, 1000)
+	if err := os.Chown(codeServerSettingsPath, 1000, 1000); err != nil {
+		jsonErr(w, "failed to set file ownership", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"theme": req.Theme, "colorTheme": colorTheme})
