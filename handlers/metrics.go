@@ -113,11 +113,18 @@ func (h *Handler) Metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	parts := strings.Fields(strings.TrimSpace(diskOut))
-	var totalGB, usedGB, freeGB int
+	var totalGB, usedGB, freeGB float64
+	const bytesPerGB = float64(1 << 30)
 	if len(parts) >= 3 {
-		totalGB, _ = strconv.Atoi(parts[0])
-		usedGB, _ = strconv.Atoi(parts[1])
-		freeGB, _ = strconv.Atoi(parts[2])
+		if v, err2 := strconv.ParseFloat(parts[0], 64); err2 == nil {
+			totalGB = math.Round(v/bytesPerGB*100) / 100
+		}
+		if v, err2 := strconv.ParseFloat(parts[1], 64); err2 == nil {
+			usedGB = math.Round(v/bytesPerGB*100) / 100
+		}
+		if v, err2 := strconv.ParseFloat(parts[2], 64); err2 == nil {
+			freeGB = math.Round(v/bytesPerGB*100) / 100
+		}
 	}
 
 	type cpuResp struct {
@@ -130,9 +137,9 @@ func (h *Handler) Metrics(w http.ResponseWriter, r *http.Request) {
 		FreeMB  int64 `json:"free_mb"`
 	}
 	type diskResp struct {
-		TotalGB int `json:"total_gb"`
-		UsedGB  int `json:"used_gb"`
-		FreeGB  int `json:"free_gb"`
+		TotalGB float64 `json:"total_gb"`
+		UsedGB  float64 `json:"used_gb"`
+		FreeGB  float64 `json:"free_gb"`
 	}
 	type metricsResp struct {
 		CPU    cpuResp  `json:"cpu"`
