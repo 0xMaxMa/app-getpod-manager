@@ -43,4 +43,4 @@ services:
           timeout: 5s
     healthcheck:
       test: wget -qO- http://localhost:5990/health
-      interval: 30s
+      interval: 5s
