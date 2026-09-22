@@ -11,7 +11,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-const authorizedKeysPath = "/host-ssh/authorized_keys"
+var authorizedKeysPath = "/host-ssh/authorized_keys"
 
 type sshKey struct {
 	Fingerprint string `json:"fingerprint"`
@@ -94,7 +94,7 @@ func (h *Handler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	if _, err := f.WriteString(strings.TrimSpace(req.Key) + "\n"); err != nil {
+	if _, err := f.WriteString("\n" + strings.TrimSpace(req.Key) + "\n"); err != nil {
 		jsonErr(w, "failed to write authorized_keys", http.StatusInternalServerError)
 		return
 	}
