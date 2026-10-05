@@ -1,17 +1,21 @@
 package handlers
 
 import (
-	"bufio"
 	"encoding/json"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 
 	"golang.org/x/crypto/ssh"
 )
 
-const authorizedKeysPath = "/host-ssh/authorized_keys"
+var authorizedKeysPath = "/host-ssh/authorized_keys"
+
+// authorizedKeysMu serializes read-modify-write of authorized_keys so
+// concurrent add/delete requests can't lose or duplicate keys.
+var authorizedKeysMu sync.Mutex
 
 type sshKey struct {
 	Fingerprint string `json:"fingerprint"`
@@ -20,19 +24,19 @@ type sshKey struct {
 }
 
 func parseAuthorizedKeys() ([]sshKey, error) {
-	f, err := os.Open(authorizedKeysPath)
+	data, err := os.ReadFile(authorizedKeysPath)
 	if os.IsNotExist(err) {
 		return []sshKey{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 
-	var keys []sshKey
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	// Split manually rather than with bufio.Scanner, whose 64KB line limit
+	// would turn one oversized line into a read error.
+	keys := []sshKey{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -46,14 +50,13 @@ func parseAuthorizedKeys() ([]sshKey, error) {
 			Raw:         line,
 		})
 	}
-	if keys == nil {
-		keys = []sshKey{}
-	}
-	return keys, scanner.Err()
+	return keys, nil
 }
 
 func (h *Handler) ListSSHKeys(w http.ResponseWriter, r *http.Request) {
+	authorizedKeysMu.Lock()
 	keys, err := parseAuthorizedKeys()
+	authorizedKeysMu.Unlock()
 	if err != nil {
 		jsonErr(w, "failed to read authorized_keys", http.StatusInternalServerError)
 		return
@@ -70,15 +73,29 @@ func (h *Handler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "key is required", http.StatusBadRequest)
 		return
 	}
+	// ParseAuthorizedKey only validates the first line; reject anything that
+	// would smuggle extra lines into authorized_keys.
+	line := strings.TrimSpace(req.Key)
+	if strings.ContainsAny(line, "\r\n") {
+		jsonErr(w, "key must be a single line", http.StatusBadRequest)
+		return
+	}
 
-	pub, comment, _, _, err := ssh.ParseAuthorizedKey([]byte(req.Key))
+	pub, comment, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
 	if err != nil {
 		jsonErr(w, "invalid public key format", http.StatusBadRequest)
 		return
 	}
 	fp := ssh.FingerprintSHA256(pub)
 
-	existing, _ := parseAuthorizedKeys()
+	authorizedKeysMu.Lock()
+	defer authorizedKeysMu.Unlock()
+
+	existing, err := parseAuthorizedKeys()
+	if err != nil {
+		jsonErr(w, "failed to read authorized_keys", http.StatusInternalServerError)
+		return
+	}
 	for _, k := range existing {
 		if k.Fingerprint == fp {
 			w.Header().Set("Content-Type", "application/json")
@@ -88,20 +105,44 @@ func (h *Handler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	f, err := os.OpenFile(authorizedKeysPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	f, err := os.OpenFile(authorizedKeysPath, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		jsonErr(w, "failed to write authorized_keys", http.StatusInternalServerError)
 		return
 	}
 	defer f.Close()
-	if _, err := f.WriteString(strings.TrimSpace(req.Key) + "\n"); err != nil {
+	// Start on a fresh line if the file doesn't already end with one, otherwise
+	// the new key would be concatenated onto the last existing line.
+	entry := line + "\n"
+	needsNewline, err := missingTrailingNewline(f)
+	if err != nil {
+		jsonErr(w, "failed to read authorized_keys", http.StatusInternalServerError)
+		return
+	}
+	if needsNewline {
+		entry = "\n" + entry
+	}
+	if _, err := f.WriteString(entry); err != nil {
 		jsonErr(w, "failed to write authorized_keys", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(sshKey{Fingerprint: fp, Comment: comment, Raw: strings.TrimSpace(req.Key)})
+	json.NewEncoder(w).Encode(sshKey{Fingerprint: fp, Comment: comment, Raw: line})
+}
+
+// missingTrailingNewline reports whether f is non-empty and its last byte is not '\n'.
+func missingTrailingNewline(f *os.File) (bool, error) {
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return false, err
+	}
+	last := make([]byte, 1)
+	if _, err := f.ReadAt(last, info.Size()-1); err != nil {
+		return false, err
+	}
+	return last[0] != '\n', nil
 }
 
 func (h *Handler) DeleteSSHKey(w http.ResponseWriter, r *http.Request) {
@@ -111,37 +152,34 @@ func (h *Handler) DeleteSSHKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	keys, err := parseAuthorizedKeys()
-	if err != nil {
+	authorizedKeysMu.Lock()
+	defer authorizedKeysMu.Unlock()
+
+	data, err := os.ReadFile(authorizedKeysPath)
+	if err != nil && !os.IsNotExist(err) {
 		jsonErr(w, "failed to read authorized_keys", http.StatusInternalServerError)
 		return
 	}
 
-	var remaining []sshKey
+	// Drop only the lines holding the matching key; keep comments, blank and
+	// unparseable lines exactly as they were.
+	var kept strings.Builder
 	found := false
-	for _, k := range keys {
-		if k.Fingerprint == fp {
+	for _, line := range strings.SplitAfter(string(data), "\n") {
+		if pub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line)); err == nil && ssh.FingerprintSHA256(pub) == fp {
 			found = true
-		} else {
-			remaining = append(remaining, k)
+			continue
 		}
+		kept.WriteString(line)
 	}
 	if !found {
 		jsonErr(w, "key not found", http.StatusNotFound)
 		return
 	}
 
-	f, err := os.OpenFile(authorizedKeysPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-	if err != nil {
+	if err := os.WriteFile(authorizedKeysPath, []byte(kept.String()), 0600); err != nil {
 		jsonErr(w, "failed to write authorized_keys", http.StatusInternalServerError)
 		return
-	}
-	defer f.Close()
-	for _, k := range remaining {
-		if _, err := f.WriteString(k.Raw + "\n"); err != nil {
-			jsonErr(w, "failed to write authorized_keys", http.StatusInternalServerError)
-			return
-		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

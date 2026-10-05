@@ -1,0 +1,379 @@
+package handlers
+
+import (
+	"bytes"
+	"crypto/ed25519"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"golang.org/x/crypto/ssh"
+)
+
+const (
+	testKey1 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFa+9EtJ6rJpoRdgiqPgUejuPmbudJ1n1D8R2m9ScJ/w test1@test"
+	testKey2 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIO+AWw+i9Ga9o5gJm3g1EONbL3T5vuL3eOFhejnCtqoq test2@test"
+)
+
+func setupSSHTest(t *testing.T) *Handler {
+	t.Helper()
+	origPath := authorizedKeysPath
+	authorizedKeysPath = filepath.Join(t.TempDir(), "authorized_keys")
+	t.Cleanup(func() { authorizedKeysPath = origPath })
+	return &Handler{apiKey: "test-key"}
+}
+
+// TestAddSSHKey_NoTrailingNewline is the regression test for the bug:
+// when authorized_keys has no trailing newline, appending without a leading \n
+// concatenates the new key onto the last line, making both keys invalid.
+func TestAddSSHKey_NoTrailingNewline(t *testing.T) {
+	h := setupSSHTest(t)
+
+	// Write first key WITHOUT a trailing newline — this is the problematic state.
+	if err := os.WriteFile(authorizedKeysPath, []byte(testKey1), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Add second key via handler
+	body, _ := json.Marshal(map[string]string{"key": testKey2})
+	req := httptest.NewRequest(http.MethodPost, "/ssh-keys", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.AddSSHKey(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	after, _ := os.ReadFile(authorizedKeysPath)
+
+	// Count non-empty key lines
+	var keyLines []string
+	for _, l := range strings.Split(string(after), "\n") {
+		if strings.TrimSpace(l) != "" {
+			keyLines = append(keyLines, l)
+		}
+	}
+
+	if len(keyLines) != 2 {
+		t.Fatalf("expected 2 separate key lines, got %d: %v", len(keyLines), keyLines)
+	}
+	if keyLines[0] != testKey1 {
+		t.Errorf("first key corrupted: %q", keyLines[0])
+	}
+	if keyLines[1] != testKey2 {
+		t.Errorf("second key corrupted: %q", keyLines[1])
+	}
+
+	// Verify both keys parse correctly
+	keys, err := parseAuthorizedKeys()
+	if err != nil {
+		t.Fatal("parseAuthorizedKeys:", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 parseable keys, got %d", len(keys))
+	}
+}
+
+func TestAddSSHKey_WithTrailingNewline(t *testing.T) {
+	h := setupSSHTest(t)
+
+	// Write first key WITH trailing newline
+	if err := os.WriteFile(authorizedKeysPath, []byte(testKey1+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	body, _ := json.Marshal(map[string]string{"key": testKey2})
+	req := httptest.NewRequest(http.MethodPost, "/ssh-keys", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.AddSSHKey(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	keys, err := parseAuthorizedKeys()
+	if err != nil {
+		t.Fatal("parseAuthorizedKeys:", err)
+	}
+	if len(keys) != 2 {
+		t.Fatalf("expected 2 valid keys, got %d", len(keys))
+	}
+}
+
+func TestAddSSHKey_DuplicateRejected(t *testing.T) {
+	h := setupSSHTest(t)
+
+	for i, wantStatus := range []int{http.StatusCreated, http.StatusConflict} {
+		body, _ := json.Marshal(map[string]string{"key": testKey1})
+		req := httptest.NewRequest(http.MethodPost, "/ssh-keys", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.AddSSHKey(w, req)
+		if w.Code != wantStatus {
+			t.Errorf("attempt %d: expected %d, got %d: %s", i+1, wantStatus, w.Code, w.Body.String())
+		}
+	}
+}
+
+func postSSHKey(t *testing.T, h *Handler, key string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"key": key})
+	req := httptest.NewRequest(http.MethodPost, "/ssh-keys", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.AddSSHKey(w, req)
+	return w
+}
+
+func readKeysFile(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(authorizedKeysPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestAddSSHKey_MultiLineRejected(t *testing.T) {
+	for name, key := range map[string]string{
+		"LF":           "garbage line\n" + testKey1 + "\n" + `command="/bin/evil" ` + testKey2,
+		"CR":           testKey1 + "\r" + testKey2,
+		"trailing LF+": testKey1 + "\n" + testKey2 + "\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := setupSSHTest(t)
+			w := postSSHKey(t, h, key)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+			if _, err := os.Stat(authorizedKeysPath); !os.IsNotExist(err) {
+				t.Errorf("authorized_keys must not be written, stat err=%v content=%q", err, readKeysFile(t))
+			}
+		})
+	}
+}
+
+func TestAddSSHKey_RawMatchesWrittenLine(t *testing.T) {
+	h := setupSSHTest(t)
+	w := postSSHKey(t, h, "  "+testKey1+"\n")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp sshKey
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if got := readKeysFile(t); got != resp.Raw+"\n" {
+		t.Errorf("file %q does not match response raw %q", got, resp.Raw)
+	}
+}
+
+func TestAddSSHKey_MissingFile(t *testing.T) {
+	h := setupSSHTest(t)
+	if w := postSSHKey(t, h, testKey1); w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if got, want := readKeysFile(t), testKey1+"\n"; got != want {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+}
+
+func TestAddSSHKey_EmptyFile(t *testing.T) {
+	h := setupSSHTest(t)
+	if err := os.WriteFile(authorizedKeysPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if w := postSSHKey(t, h, testKey1); w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if got, want := readKeysFile(t), testKey1+"\n"; got != want {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+}
+
+func TestAddSSHKey_NoBlankLineGrowth(t *testing.T) {
+	h := setupSSHTest(t)
+	for _, k := range []string{testKey1, testKey2} {
+		if w := postSSHKey(t, h, k); w.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+	if got, want := readKeysFile(t), testKey1+"\n"+testKey2+"\n"; got != want {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+}
+
+func genSSHKey(t *testing.T, comment string) (line, fingerprint string) {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshPub, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub))) + " " + comment
+	return line, ssh.FingerprintSHA256(sshPub)
+}
+
+func deleteSSHKey(h *Handler, fp string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodDelete, "/ssh-keys/x", nil)
+	req.SetPathValue("fingerprint", fp)
+	w := httptest.NewRecorder()
+	h.DeleteSSHKey(w, req)
+	return w
+}
+
+// TestSSHKeys_ConcurrentAddDelete: a delete rewrites the whole file, so without
+// serialization a key appended between its read and its rewrite is lost.
+func TestSSHKeys_ConcurrentAddDelete(t *testing.T) {
+	h := setupSSHTest(t)
+	const rounds, adders = 20, 8
+	for r := 0; r < rounds; r++ {
+		os.Remove(authorizedKeysPath)
+		victims := make([]string, adders)
+		added := make([]string, adders)
+		for i := range victims {
+			var line string
+			line, victims[i] = genSSHKey(t, "victim")
+			if w := postSSHKey(t, h, line); w.Code != http.StatusCreated {
+				t.Fatalf("seed: %d %s", w.Code, w.Body.String())
+			}
+			added[i], _ = genSSHKey(t, fmt.Sprintf("added%d", i))
+		}
+
+		var wg sync.WaitGroup
+		for i := 0; i < adders; i++ {
+			wg.Add(2)
+			go func(i int) { defer wg.Done(); postSSHKey(t, h, added[i]) }(i)
+			go func(i int) { defer wg.Done(); deleteSSHKey(h, victims[i]) }(i)
+		}
+		wg.Wait()
+
+		content := readKeysFile(t)
+		for _, k := range added {
+			if !strings.Contains(content, k) {
+				t.Fatalf("round %d: concurrently added key lost:\n%s", r, content)
+			}
+		}
+		if strings.Contains(content, "victim") {
+			t.Fatalf("round %d: deleted key still present:\n%s", r, content)
+		}
+	}
+}
+
+func TestAddSSHKey_ConcurrentDuplicate(t *testing.T) {
+	h := setupSSHTest(t)
+	const n = 16
+	var created sync.WaitGroup
+	codes := make([]int, n)
+	for i := 0; i < n; i++ {
+		created.Add(1)
+		go func(i int) { defer created.Done(); codes[i] = postSSHKey(t, h, testKey1).Code }(i)
+	}
+	created.Wait()
+	ok := 0
+	for _, c := range codes {
+		if c == http.StatusCreated {
+			ok++
+		}
+	}
+	if ok != 1 {
+		t.Errorf("expected exactly one 201 for the same key, got %d (codes %v)", ok, codes)
+	}
+}
+
+func TestDeleteSSHKey_PreservesOtherLines(t *testing.T) {
+	h := setupSSHTest(t)
+	pub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(testKey1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp1 := ssh.FingerprintSHA256(pub)
+	content := "# managed by getpod\n" +
+		"#" + testKey1 + "\n" +
+		testKey1 + "\n" +
+		"not a valid key line\n" +
+		`no-pty ` + testKey2 + "\n" +
+		testKey1 + "\n"
+	if err := os.WriteFile(authorizedKeysPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if w := deleteSSHKey(h, fp1); w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	want := "# managed by getpod\n" +
+		"#" + testKey1 + "\n" +
+		"not a valid key line\n" +
+		`no-pty ` + testKey2 + "\n"
+	if got := readKeysFile(t); got != want {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+}
+
+func TestDeleteSSHKey_NotFound(t *testing.T) {
+	h := setupSSHTest(t)
+	if w := deleteSSHKey(h, "SHA256:nope"); w.Code != http.StatusNotFound {
+		t.Fatalf("missing file: expected 404, got %d", w.Code)
+	}
+	if err := os.WriteFile(authorizedKeysPath, []byte("# only a comment\n"+testKey2+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if w := deleteSSHKey(h, "SHA256:nope"); w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+	if got, want := readKeysFile(t), "# only a comment\n"+testKey2+"\n"; got != want {
+		t.Errorf("file changed on 404: %q", got)
+	}
+}
+
+// longLine exceeds bufio.Scanner's 64KB default token size.
+var longLine = "# " + strings.Repeat("x", 70*1024)
+
+func TestListSSHKeys_LongLine(t *testing.T) {
+	h := setupSSHTest(t)
+	if err := os.WriteFile(authorizedKeysPath, []byte(testKey1+"\n"+longLine+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	h.ListSSHKeys(w, httptest.NewRequest(http.MethodGet, "/ssh-keys", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var keys []sshKey
+	if err := json.Unmarshal(w.Body.Bytes(), &keys); err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 || keys[0].Raw != testKey1 {
+		t.Errorf("got %+v, want only testKey1", keys)
+	}
+}
+
+func TestAddSSHKey_LongLine(t *testing.T) {
+	h := setupSSHTest(t)
+	if err := os.WriteFile(authorizedKeysPath, []byte(testKey1+"\n"+longLine+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if w := postSSHKey(t, h, testKey2); w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if w := postSSHKey(t, h, testKey1); w.Code != http.StatusConflict {
+		t.Fatalf("duplicate: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if got, want := readKeysFile(t), testKey1+"\n"+longLine+"\n"+testKey2+"\n"; got != want {
+		t.Errorf("unexpected file content (len %d, want %d)", len(got), len(want))
+	}
+}
