@@ -291,3 +291,49 @@ func TestAddSSHKey_ConcurrentDuplicate(t *testing.T) {
 		t.Errorf("expected exactly one 201 for the same key, got %d (codes %v)", ok, codes)
 	}
 }
+
+func TestDeleteSSHKey_PreservesOtherLines(t *testing.T) {
+	h := setupSSHTest(t)
+	pub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(testKey1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp1 := ssh.FingerprintSHA256(pub)
+	content := "# managed by getpod\n" +
+		"#" + testKey1 + "\n" +
+		testKey1 + "\n" +
+		"not a valid key line\n" +
+		`no-pty ` + testKey2 + "\n" +
+		testKey1 + "\n"
+	if err := os.WriteFile(authorizedKeysPath, []byte(content), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if w := deleteSSHKey(h, fp1); w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	want := "# managed by getpod\n" +
+		"#" + testKey1 + "\n" +
+		"not a valid key line\n" +
+		`no-pty ` + testKey2 + "\n"
+	if got := readKeysFile(t); got != want {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+}
+
+func TestDeleteSSHKey_NotFound(t *testing.T) {
+	h := setupSSHTest(t)
+	if w := deleteSSHKey(h, "SHA256:nope"); w.Code != http.StatusNotFound {
+		t.Fatalf("missing file: expected 404, got %d", w.Code)
+	}
+	if err := os.WriteFile(authorizedKeysPath, []byte("# only a comment\n"+testKey2+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if w := deleteSSHKey(h, "SHA256:nope"); w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+	if got, want := readKeysFile(t), "# only a comment\n"+testKey2+"\n"; got != want {
+		t.Errorf("file changed on 404: %q", got)
+	}
+}

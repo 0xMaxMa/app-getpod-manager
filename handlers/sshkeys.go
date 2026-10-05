@@ -159,37 +159,31 @@ func (h *Handler) DeleteSSHKey(w http.ResponseWriter, r *http.Request) {
 	authorizedKeysMu.Lock()
 	defer authorizedKeysMu.Unlock()
 
-	keys, err := parseAuthorizedKeys()
-	if err != nil {
+	data, err := os.ReadFile(authorizedKeysPath)
+	if err != nil && !os.IsNotExist(err) {
 		jsonErr(w, "failed to read authorized_keys", http.StatusInternalServerError)
 		return
 	}
 
-	var remaining []sshKey
+	// Drop only the lines holding the matching key; keep comments, blank and
+	// unparseable lines exactly as they were.
+	var kept strings.Builder
 	found := false
-	for _, k := range keys {
-		if k.Fingerprint == fp {
+	for _, line := range strings.SplitAfter(string(data), "\n") {
+		if pub, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line)); err == nil && ssh.FingerprintSHA256(pub) == fp {
 			found = true
-		} else {
-			remaining = append(remaining, k)
+			continue
 		}
+		kept.WriteString(line)
 	}
 	if !found {
 		jsonErr(w, "key not found", http.StatusNotFound)
 		return
 	}
 
-	f, err := os.OpenFile(authorizedKeysPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
-	if err != nil {
+	if err := os.WriteFile(authorizedKeysPath, []byte(kept.String()), 0600); err != nil {
 		jsonErr(w, "failed to write authorized_keys", http.StatusInternalServerError)
 		return
-	}
-	defer f.Close()
-	for _, k := range remaining {
-		if _, err := f.WriteString(k.Raw + "\n"); err != nil {
-			jsonErr(w, "failed to write authorized_keys", http.StatusInternalServerError)
-			return
-		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
