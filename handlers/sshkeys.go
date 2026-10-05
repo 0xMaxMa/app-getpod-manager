@@ -7,11 +7,16 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 
 	"golang.org/x/crypto/ssh"
 )
 
 var authorizedKeysPath = "/host-ssh/authorized_keys"
+
+// authorizedKeysMu serializes read-modify-write of authorized_keys so
+// concurrent add/delete requests can't lose or duplicate keys.
+var authorizedKeysMu sync.Mutex
 
 type sshKey struct {
 	Fingerprint string `json:"fingerprint"`
@@ -53,7 +58,9 @@ func parseAuthorizedKeys() ([]sshKey, error) {
 }
 
 func (h *Handler) ListSSHKeys(w http.ResponseWriter, r *http.Request) {
+	authorizedKeysMu.Lock()
 	keys, err := parseAuthorizedKeys()
+	authorizedKeysMu.Unlock()
 	if err != nil {
 		jsonErr(w, "failed to read authorized_keys", http.StatusInternalServerError)
 		return
@@ -85,7 +92,14 @@ func (h *Handler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
 	}
 	fp := ssh.FingerprintSHA256(pub)
 
-	existing, _ := parseAuthorizedKeys()
+	authorizedKeysMu.Lock()
+	defer authorizedKeysMu.Unlock()
+
+	existing, err := parseAuthorizedKeys()
+	if err != nil {
+		jsonErr(w, "failed to read authorized_keys", http.StatusInternalServerError)
+		return
+	}
 	for _, k := range existing {
 		if k.Fingerprint == fp {
 			w.Header().Set("Content-Type", "application/json")
@@ -141,6 +155,9 @@ func (h *Handler) DeleteSSHKey(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "invalid fingerprint", http.StatusBadRequest)
 		return
 	}
+
+	authorizedKeysMu.Lock()
+	defer authorizedKeysMu.Unlock()
 
 	keys, err := parseAuthorizedKeys()
 	if err != nil {

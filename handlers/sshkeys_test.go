@@ -2,13 +2,18 @@ package handlers
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+
+	"golang.org/x/crypto/ssh"
 )
 
 const (
@@ -203,5 +208,86 @@ func TestAddSSHKey_NoBlankLineGrowth(t *testing.T) {
 	}
 	if got, want := readKeysFile(t), testKey1+"\n"+testKey2+"\n"; got != want {
 		t.Errorf("content = %q, want %q", got, want)
+	}
+}
+
+func genSSHKey(t *testing.T, comment string) (line, fingerprint string) {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshPub, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub))) + " " + comment
+	return line, ssh.FingerprintSHA256(sshPub)
+}
+
+func deleteSSHKey(h *Handler, fp string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodDelete, "/ssh-keys/x", nil)
+	req.SetPathValue("fingerprint", fp)
+	w := httptest.NewRecorder()
+	h.DeleteSSHKey(w, req)
+	return w
+}
+
+// TestSSHKeys_ConcurrentAddDelete: a delete rewrites the whole file, so without
+// serialization a key appended between its read and its rewrite is lost.
+func TestSSHKeys_ConcurrentAddDelete(t *testing.T) {
+	h := setupSSHTest(t)
+	const rounds, adders = 20, 8
+	for r := 0; r < rounds; r++ {
+		os.Remove(authorizedKeysPath)
+		victims := make([]string, adders)
+		added := make([]string, adders)
+		for i := range victims {
+			var line string
+			line, victims[i] = genSSHKey(t, "victim")
+			if w := postSSHKey(t, h, line); w.Code != http.StatusCreated {
+				t.Fatalf("seed: %d %s", w.Code, w.Body.String())
+			}
+			added[i], _ = genSSHKey(t, fmt.Sprintf("added%d", i))
+		}
+
+		var wg sync.WaitGroup
+		for i := 0; i < adders; i++ {
+			wg.Add(2)
+			go func(i int) { defer wg.Done(); postSSHKey(t, h, added[i]) }(i)
+			go func(i int) { defer wg.Done(); deleteSSHKey(h, victims[i]) }(i)
+		}
+		wg.Wait()
+
+		content := readKeysFile(t)
+		for _, k := range added {
+			if !strings.Contains(content, k) {
+				t.Fatalf("round %d: concurrently added key lost:\n%s", r, content)
+			}
+		}
+		if strings.Contains(content, "victim") {
+			t.Fatalf("round %d: deleted key still present:\n%s", r, content)
+		}
+	}
+}
+
+func TestAddSSHKey_ConcurrentDuplicate(t *testing.T) {
+	h := setupSSHTest(t)
+	const n = 16
+	var created sync.WaitGroup
+	codes := make([]int, n)
+	for i := 0; i < n; i++ {
+		created.Add(1)
+		go func(i int) { defer created.Done(); codes[i] = postSSHKey(t, h, testKey1).Code }(i)
+	}
+	created.Wait()
+	ok := 0
+	for _, c := range codes {
+		if c == http.StatusCreated {
+			ok++
+		}
+	}
+	if ok != 1 {
+		t.Errorf("expected exactly one 201 for the same key, got %d (codes %v)", ok, codes)
 	}
 }
