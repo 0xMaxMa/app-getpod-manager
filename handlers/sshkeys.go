@@ -70,8 +70,15 @@ func (h *Handler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "key is required", http.StatusBadRequest)
 		return
 	}
+	// ParseAuthorizedKey only validates the first line; reject anything that
+	// would smuggle extra lines into authorized_keys.
+	line := strings.TrimSpace(req.Key)
+	if strings.ContainsAny(line, "\r\n") {
+		jsonErr(w, "key must be a single line", http.StatusBadRequest)
+		return
+	}
 
-	pub, comment, _, _, err := ssh.ParseAuthorizedKey([]byte(req.Key))
+	pub, comment, _, _, err := ssh.ParseAuthorizedKey([]byte(line))
 	if err != nil {
 		jsonErr(w, "invalid public key format", http.StatusBadRequest)
 		return
@@ -94,14 +101,14 @@ func (h *Handler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	if _, err := f.WriteString("\n" + strings.TrimSpace(req.Key) + "\n"); err != nil {
+	if _, err := f.WriteString("\n" + line + "\n"); err != nil {
 		jsonErr(w, "failed to write authorized_keys", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(sshKey{Fingerprint: fp, Comment: comment, Raw: strings.TrimSpace(req.Key)})
+	json.NewEncoder(w).Encode(sshKey{Fingerprint: fp, Comment: comment, Raw: line})
 }
 
 func (h *Handler) DeleteSSHKey(w http.ResponseWriter, r *http.Request) {

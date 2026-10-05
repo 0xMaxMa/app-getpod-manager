@@ -117,3 +117,41 @@ func TestAddSSHKey_DuplicateRejected(t *testing.T) {
 		}
 	}
 }
+
+func postSSHKey(t *testing.T, h *Handler, key string) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(map[string]string{"key": key})
+	req := httptest.NewRequest(http.MethodPost, "/ssh-keys", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.AddSSHKey(w, req)
+	return w
+}
+
+func readKeysFile(t *testing.T) string {
+	t.Helper()
+	data, err := os.ReadFile(authorizedKeysPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+func TestAddSSHKey_MultiLineRejected(t *testing.T) {
+	for name, key := range map[string]string{
+		"LF":           "garbage line\n" + testKey1 + "\n" + `command="/bin/evil" ` + testKey2,
+		"CR":           testKey1 + "\r" + testKey2,
+		"trailing LF+": testKey1 + "\n" + testKey2 + "\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := setupSSHTest(t)
+			w := postSSHKey(t, h, key)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+			if _, err := os.Stat(authorizedKeysPath); !os.IsNotExist(err) {
+				t.Errorf("authorized_keys must not be written, stat err=%v content=%q", err, readKeysFile(t))
+			}
+		})
+	}
+}
