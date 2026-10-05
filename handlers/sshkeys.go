@@ -95,13 +95,24 @@ func (h *Handler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	f, err := os.OpenFile(authorizedKeysPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	f, err := os.OpenFile(authorizedKeysPath, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		jsonErr(w, "failed to write authorized_keys", http.StatusInternalServerError)
 		return
 	}
 	defer f.Close()
-	if _, err := f.WriteString("\n" + line + "\n"); err != nil {
+	// Start on a fresh line if the file doesn't already end with one, otherwise
+	// the new key would be concatenated onto the last existing line.
+	entry := line + "\n"
+	needsNewline, err := missingTrailingNewline(f)
+	if err != nil {
+		jsonErr(w, "failed to read authorized_keys", http.StatusInternalServerError)
+		return
+	}
+	if needsNewline {
+		entry = "\n" + entry
+	}
+	if _, err := f.WriteString(entry); err != nil {
 		jsonErr(w, "failed to write authorized_keys", http.StatusInternalServerError)
 		return
 	}
@@ -109,6 +120,19 @@ func (h *Handler) AddSSHKey(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(sshKey{Fingerprint: fp, Comment: comment, Raw: line})
+}
+
+// missingTrailingNewline reports whether f is non-empty and its last byte is not '\n'.
+func missingTrailingNewline(f *os.File) (bool, error) {
+	info, err := f.Stat()
+	if err != nil || info.Size() == 0 {
+		return false, err
+	}
+	last := make([]byte, 1)
+	if _, err := f.ReadAt(last, info.Size()-1); err != nil {
+		return false, err
+	}
+	return last[0] != '\n', nil
 }
 
 func (h *Handler) DeleteSSHKey(w http.ResponseWriter, r *http.Request) {

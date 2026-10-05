@@ -155,3 +155,53 @@ func TestAddSSHKey_MultiLineRejected(t *testing.T) {
 		})
 	}
 }
+
+func TestAddSSHKey_RawMatchesWrittenLine(t *testing.T) {
+	h := setupSSHTest(t)
+	w := postSSHKey(t, h, "  "+testKey1+"\n")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp sshKey
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+	if got := readKeysFile(t); got != resp.Raw+"\n" {
+		t.Errorf("file %q does not match response raw %q", got, resp.Raw)
+	}
+}
+
+func TestAddSSHKey_MissingFile(t *testing.T) {
+	h := setupSSHTest(t)
+	if w := postSSHKey(t, h, testKey1); w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if got, want := readKeysFile(t), testKey1+"\n"; got != want {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+}
+
+func TestAddSSHKey_EmptyFile(t *testing.T) {
+	h := setupSSHTest(t)
+	if err := os.WriteFile(authorizedKeysPath, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if w := postSSHKey(t, h, testKey1); w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if got, want := readKeysFile(t), testKey1+"\n"; got != want {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+}
+
+func TestAddSSHKey_NoBlankLineGrowth(t *testing.T) {
+	h := setupSSHTest(t)
+	for _, k := range []string{testKey1, testKey2} {
+		if w := postSSHKey(t, h, k); w.Code != http.StatusCreated {
+			t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+	if got, want := readKeysFile(t), testKey1+"\n"+testKey2+"\n"; got != want {
+		t.Errorf("content = %q, want %q", got, want)
+	}
+}
