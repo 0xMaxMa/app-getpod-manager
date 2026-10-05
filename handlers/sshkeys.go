@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"bufio"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -25,19 +24,19 @@ type sshKey struct {
 }
 
 func parseAuthorizedKeys() ([]sshKey, error) {
-	f, err := os.Open(authorizedKeysPath)
+	data, err := os.ReadFile(authorizedKeysPath)
 	if os.IsNotExist(err) {
 		return []sshKey{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
 
-	var keys []sshKey
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	// Split manually rather than with bufio.Scanner, whose 64KB line limit
+	// would turn one oversized line into a read error.
+	keys := []sshKey{}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
@@ -51,10 +50,7 @@ func parseAuthorizedKeys() ([]sshKey, error) {
 			Raw:         line,
 		})
 	}
-	if keys == nil {
-		keys = []sshKey{}
-	}
-	return keys, scanner.Err()
+	return keys, nil
 }
 
 func (h *Handler) ListSSHKeys(w http.ResponseWriter, r *http.Request) {

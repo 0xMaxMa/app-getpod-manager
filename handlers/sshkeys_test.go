@@ -337,3 +337,43 @@ func TestDeleteSSHKey_NotFound(t *testing.T) {
 		t.Errorf("file changed on 404: %q", got)
 	}
 }
+
+// longLine exceeds bufio.Scanner's 64KB default token size.
+var longLine = "# " + strings.Repeat("x", 70*1024)
+
+func TestListSSHKeys_LongLine(t *testing.T) {
+	h := setupSSHTest(t)
+	if err := os.WriteFile(authorizedKeysPath, []byte(testKey1+"\n"+longLine+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	w := httptest.NewRecorder()
+	h.ListSSHKeys(w, httptest.NewRequest(http.MethodGet, "/ssh-keys", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var keys []sshKey
+	if err := json.Unmarshal(w.Body.Bytes(), &keys); err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 1 || keys[0].Raw != testKey1 {
+		t.Errorf("got %+v, want only testKey1", keys)
+	}
+}
+
+func TestAddSSHKey_LongLine(t *testing.T) {
+	h := setupSSHTest(t)
+	if err := os.WriteFile(authorizedKeysPath, []byte(testKey1+"\n"+longLine+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if w := postSSHKey(t, h, testKey2); w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	if w := postSSHKey(t, h, testKey1); w.Code != http.StatusConflict {
+		t.Fatalf("duplicate: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if got, want := readKeysFile(t), testKey1+"\n"+longLine+"\n"+testKey2+"\n"; got != want {
+		t.Errorf("unexpected file content (len %d, want %d)", len(got), len(want))
+	}
+}
